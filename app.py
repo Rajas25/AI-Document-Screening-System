@@ -9,7 +9,12 @@ import hashlib
 from datetime import datetime
 
 import easyocr
+
 from deepface import DeepFace
+=======
+import face_recognition  # <-- REPLACED DeepFace with this
+from verhoeff import validate_aadhaar
+>>>>>>> Stashed changes
 
 
 # ============================================================
@@ -63,6 +68,7 @@ def load_ocr():
 
 reader = load_ocr()
 
+<<<<<<< Updated upstream
 
 # ============================================================
 # LOAD FACE DETECTOR
@@ -266,6 +272,132 @@ def run_ocr(image):
             pass
 
     return all_results
+=======
+if uploaded_doc and uploaded_face:
+    # Process Uploads into CV2 matrices
+    doc_bytes = np.frombuffer(uploaded_doc.read(), np.uint8)
+    doc_img = cv2.imdecode(doc_bytes, cv2.IMREAD_COLOR)
+    
+    face_bytes = np.frombuffer(uploaded_face.read(), np.uint8)
+    face_img = cv2.imdecode(face_bytes, cv2.IMREAD_COLOR)
+    
+    # Render Layout Check columns
+    st.markdown("---")
+    res_col1, res_col2 = st.columns(2)
+    
+    with res_col1:
+        st.subheader("🔍 Automated Verification Engine Execution")
+        
+        # MODULE 1: Smart Text extraction via EasyOCR with Auto-Rotation Correction
+        with st.spinner("Extracting text via EasyOCR..."):
+            raw_ocr = ocr_net.readtext(doc_img)
+            
+            detected_text_pool = [item[1] for item in raw_ocr] if raw_ocr else []
+            full_text_dump = " ".join(detected_text_pool)
+            cleaned_upper_text = full_text_dump.upper().replace(" ", "")
+            
+            # If no standard Indian card format is found, attempt auto-rotation checks
+            if not re.search(r'\d{12}', cleaned_upper_text) and not re.search(r'[A-Z]{5}[0-9]{4}[A-Z]{1}', cleaned_upper_text):
+                st.info("🔄 Non-horizontal layout suspected. Attempting automatic orientation correction...")
+                
+                # Test rotations: 90 degrees clockwise, 180, and 270 degrees
+                for angle in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
+                    rotated_img = cv2.rotate(doc_img, angle)
+                    rotated_ocr = ocr_net.readtext(rotated_img)
+                    
+                    test_pool = [item[1] for item in rotated_ocr] if rotated_ocr else []
+                    test_text = " ".join(test_pool).upper().replace(" ", "")
+                    
+                    # Check if the rotated version successfully uncovers a valid target layout
+                    if re.search(r'\d{12}', test_text) or re.search(r'[A-Z]{5}[0-9]{4}[A-Z]{1}', test_text):
+                        doc_img = rotated_img  # Update image reference for later face cropping
+                        raw_ocr = rotated_ocr
+                        detected_text_pool = test_pool
+                        full_text_dump = " ".join(detected_text_pool)
+                        st.success("✔️ Orientation successfully corrected!")
+                        break
+
+        
+        # MODULE 2: Custom Indian Validation Rules
+        st.write("**📋 Mathematical Validation Status:**")
+        
+        # Clean string variations for regex lookups
+        cleaned_upper_text = full_text_dump.upper().replace(" ", "")
+        
+        pan_match = re.search(r'[A-Z]{5}[0-9]{4}[A-Z]{1}', cleaned_upper_text)
+        aadhaar_match = re.search(r'\d{12}', cleaned_upper_text)
+        
+        is_valid_format = False
+        
+        if pan_match:
+            pan_str = pan_match.group(0)
+            st.success(f"✔️ Found PAN Card Structure: {pan_str}")
+            # Rule validation: 4th char dictates individual/entity status code
+            if pan_str[3] in ['P', 'C', 'H', 'F', 'A', 'T', 'B', 'L', 'J', 'G']:
+                st.success("✔️ Rule Validation: PAN holder category structural code verified.")
+                is_valid_format = True
+            else:
+                st.error("❌ Rule Anomaly: Fraudulent or non-standard PAN holder category identifier.")
+                
+        elif aadhaar_match:
+            raw_aadhaar = aadhaar_match.group(0)
+            st.info(f"Checking Aadhaar sequence match: {raw_aadhaar}")
+            # Verhoeff math parsing execution
+            if validate_aadhaar(raw_aadhaar):
+                st.success("✔️ Rule Validation: Aadhaar 12-digit Verhoeff Checksum matches perfectly.")
+                is_valid_format = True
+            else:
+                st.error("❌ Alteration Alert: String failed mathematical Verhoeff verification.")
+        else:
+            st.warning("⚠️ No clear Indian standardized ID layout formatting rules triggered via OCR.")
+            
+        # MODULE 4: Face Verification using face_recognition (NO TensorFlow!)
+        face_match = False
+        confidence = 0.0
+        with st.spinner("Detecting and comparing faces..."):
+            try:
+                # Convert BGR to RGB (face_recognition expects RGB)
+                doc_rgb = cv2.cvtColor(doc_img, cv2.COLOR_BGR2RGB)
+                face_rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+                
+                # Get face locations and encodings
+                doc_face_locations = face_recognition.face_locations(doc_rgb)
+                live_face_locations = face_recognition.face_locations(face_rgb)
+                
+                if doc_face_locations and live_face_locations:
+                    # Get encodings for the detected faces
+                    doc_face_encodings = face_recognition.face_encodings(doc_rgb, doc_face_locations)
+                    live_face_encodings = face_recognition.face_encodings(face_rgb, live_face_locations)
+                    
+                    if doc_face_encodings and live_face_encodings:
+                        # Compare the faces
+                        results = face_recognition.compare_faces(
+                            [doc_face_encodings[0]], 
+                            live_face_encodings[0],
+                            tolerance=0.6  # Lower = stricter matching
+                        )
+                        face_match = results[0]
+                        confidence = 0.85 if face_match else 0.25
+                        
+                        if face_match:
+                            st.success(f"✔️ Identity Authenticated: Face match confirmed (Confidence: {confidence:.2f})")
+                        else:
+                            st.error(f"❌ Alert: Cross-verification anomaly. Facial confidence match low ({confidence:.2f})")
+                    else:
+                        st.warning("⚠️ Could not encode faces")
+                else:
+                    st.warning("⚠️ No face detected in one or both images")
+                    # Show where faces were detected
+                    if doc_face_locations:
+                        st.info(f"Face found in document image: {len(doc_face_locations)} face(s)")
+                    if live_face_locations:
+                        st.info(f"Face found in live image: {len(live_face_locations)} face(s)")
+                    
+            except Exception as e:
+                st.error(f"Facial analysis framework error: {str(e)}")
+                face_match = False
+                confidence = 0.0
+>>>>>>> Stashed changes
 
 
 def ocr_results_to_text(results):
@@ -715,6 +847,7 @@ def score_orientation(image):
             )
 
         else:
+<<<<<<< Updated upstream
 
             small = image
 
@@ -2823,3 +2956,7 @@ if run_screening:
         "Any adverse action must be based on authorized human "
         "verification and applicable operational procedures."
     )
+=======
+            st.success(f"✅ CLEAR STATUS (Risk Index Score: {risk_score}%)")
+            st.metric(label="Action Required", value="ALLOW BORDER ENTRY")
+
