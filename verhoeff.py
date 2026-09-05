@@ -40,3 +40,34 @@ def validate_aadhaar(aadhaar_num: str) -> bool:
         c = verhoeff_table_d[c][verhoeff_table_p[i % 8][int(item)]]
         
     return c == 0
+def calculate_mrz_check_digit(mrz_string: str) -> int:
+    """Calculates the ICAO 9303 MRZ weighting checksum."""
+    weights = [7, 3, 1]
+    total = 0
+    for i, char in enumerate(mrz_string):
+        if char == '<':
+            val = 0
+        elif char.isdigit():
+            val = int(char)
+        elif char.isalpha():
+            val = ord(char) - ord('A') + 10
+        else:
+            val = 0
+        total += val * weights[i % 3]
+    return total % 10
+
+def validate_passport_mrz(mrz_line: str) -> bool:
+    """Validates an isolated Passport MRZ segment string."""
+    # Strip whitespace
+    clean_line = mrz_line.replace(" ", "").upper()
+    if len(clean_line) < 9:
+        return False
+    
+    # Document core sequence verification (e.g. Passport Number + Check Digit)
+    core_data = clean_line[:9]
+    check_digit = clean_line[9]
+    
+    if not check_digit.isdigit():
+        return False
+        
+    return calculate_mrz_check_digit(core_data) == int(check_digit)
