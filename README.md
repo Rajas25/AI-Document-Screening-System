@@ -170,29 +170,14 @@ git clone https://github.com/your-username/your-repository.git
 cd AI-Document-Screening-System
 ```
 
-## 2. Create a Virtual Environment
 
-### Windows
-
-```powershell
-python -m venv venv
-venv\Scripts\activate
-```
-
-### Linux / macOS
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-## 3. Install Dependencies
+## 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 4. Run the Application
+## 3. Run the Application
 
 ```bash
 streamlit run app.py
