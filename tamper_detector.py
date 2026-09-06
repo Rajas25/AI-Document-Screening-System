@@ -1495,9 +1495,9 @@ def analyze_image_integrity(image):
 
         strong_spatial = (affected_area >= 1.5 and (len(significant_components) >= 3 or local_discontinuities >= 3))
         strong_component_signal = (len(significant_components) >= 5 and affected_area >= 0.8)
-        if evidence >= 50 and (affected_area >= 0.5 or len(significant_components) >= 1):
+        if evidence >= 70 and (strong_spatial or strong_component_signal or local_discontinuities >= 5):
             status='POSSIBLE MANIPULATION'
-        elif evidence >= 35 and affected_area >= 0.3:
+        elif evidence >= 55 and affected_area >= 1.0 and (len(significant_components) >= 2 or local_discontinuities >= 2):
             status='REVIEW'
         else:
             status='NO SIGNIFICANT ANOMALY'
@@ -1968,6 +1968,115 @@ def render_niko(screening):
         st.session_state.niko_messages.append({"role": "assistant", "content": answer})
         st.rerun()
 
+# ----------------------------------------------------------------------
+# NEW: Standalone tamper upload & analysis inside TamperLab
+# ----------------------------------------------------------------------
+
+def render_tamper_upload():
+    """
+    Renders an upload widget and analysis button for users to check
+    any image (downloaded or otherwise) for tampering indicators.
+    """
+    st.markdown("---")
+    st.subheader("📤 Upload an Image for Tamper Analysis")
+    st.caption(
+        "Upload any image (JPEG, PNG) to run the same forensic analysis "
+        "used in the main screening pipeline. Results are shown instantly."
+    )
+
+    uploaded_tamper_file = st.file_uploader(
+        "Choose an image…",
+        type=["jpg", "jpeg", "png"],
+        key="tamper_upload"
+    )
+
+    if uploaded_tamper_file is not None:
+        # Decode the image
+        bytes_data = uploaded_tamper_file.getvalue()
+        arr = np.frombuffer(bytes_data, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            st.error("Could not decode the image. Please try another file.")
+            return
+
+        col_img, col_res = st.columns([1, 2])
+
+        with col_img:
+            st.image(
+                cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+                caption="Uploaded Image",
+                use_container_width=True
+            )
+            st.caption(f"Resolution: {img.shape[1]} x {img.shape[0]}")
+
+        with col_res:
+            if st.button("🔍 Run Tamper Analysis", key="run_tamper_analysis"):
+                with st.spinner("Analyzing image integrity…"):
+                    integrity = analyze_image_integrity(img)
+                    synthetic = analyze_synthetic_evidence(img, integrity)
+
+                st.success("Analysis complete!")
+
+                # Display key metrics
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Global ELA", integrity.get("global_ela", 0.0))
+                m2.metric("Local Max", integrity.get("local_max", 0.0))
+                m3.metric("Hotspots", integrity.get("hotspot_count", 0))
+                m4.metric("Forensic Score", f"{integrity.get('tamper_evidence_score', 0.0):.1f}/100")
+
+                st.write(f"**Image‑integrity status:** {integrity.get('status', 'UNAVAILABLE')}")
+                st.write(
+                    f"**Synthetic/reconstruction indicator:** "
+                    f"{synthetic.get('status', 'UNAVAILABLE')} — "
+                    f"{synthetic.get('reason', '')}"
+                )
+
+                with st.expander("📊 Detailed Metrics"):
+                    detail_df = pd.DataFrame([{
+                        "Metric": "Affected area (%)",
+                        "Value": integrity.get("affected_area_pct", 0.0)
+                    }, {
+                        "Metric": "ELA pixel hotspots",
+                        "Value": integrity.get("ela_pixel_hotspots", 0)
+                    }, {
+                        "Metric": "Local discontinuities",
+                        "Value": integrity.get("local_discontinuities", 0)
+                    }, {
+                        "Metric": "Multi‑quality gain",
+                        "Value": integrity.get("multi_quality_gain", 0)
+                    }, {
+                        "Metric": "Synthetic score",
+                        "Value": synthetic.get("score", 0.0)
+                    }])
+                    st.dataframe(detail_df, hide_index=True, use_container_width=True)
+
+                st.caption(
+                    "These are forensic screening indicators. "
+                    "They do not independently prove that an image is fake or AI‑generated."
+                )
+
+        # Optionally, allow download of the report as JSON
+        if st.button("📥 Download Report as JSON", key="download_tamper_json"):
+            import json
+            report = {
+                "image": uploaded_tamper_file.name,
+                "resolution": f"{img.shape[1]}x{img.shape[0]}",
+                "integrity": integrity,
+                "synthetic": synthetic
+            }
+            json_str = json.dumps(report, indent=2)
+            st.download_button(
+                label="Click to download",
+                data=json_str,
+                file_name="tamper_report.json",
+                mime="application/json"
+            )
+
+# ----------------------------------------------------------------------
+# END OF NEW SECTION
+# ----------------------------------------------------------------------
+
 
 def render_tamper_lab():
     st.header("🔬 TamperLab — Controlled Validation")
@@ -2009,6 +2118,12 @@ def render_tamper_lab():
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.info("Interpretation: localized ELA hotspots are more useful than the old global mean alone. A high score is a reason for secondary inspection, not proof that a document is fake.")
     st.warning("AI-generated/reconstructed document detection is only a forensic indicator here. Validate it on a representative synthetic dataset before making operational claims.")
+
+    # ----------------------------
+    # NEW: Insert the upload widget
+    # ----------------------------
+    render_tamper_upload()
+
 
 def render_analytics():
     st.header("📊 Screening Analytics")
